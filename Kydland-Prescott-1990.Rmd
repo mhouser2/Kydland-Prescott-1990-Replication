@@ -1,0 +1,305 @@
+---
+title: "Kydland Prescott (1990) Replication"
+author: "Matthew Houser"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+#install.packages("fredr")
+#install.packages("mFilter")
+#install.packages("ggthemes")
+library(tidyverse)
+library(fredr)
+library(readxl)
+library(stringr)
+library(mFilter)
+library(ggthemes)
+```
+
+
+```{r}
+fredr_set_key("2d4104c35bfc5185ef631b380c2f78dd")
+rgdp <- fredr(
+  series_id = "GDPC1",
+  frequency = "q",
+  observation_start = as.Date("1954-01-01"),
+  observation_end = as.Date("2018-07-01")
+)
+rgdp <- rgdp[,-2]
+names(rgdp) <-c("date", "rgdp")
+rc <- fredr(
+  series_id = "PCECC96",
+  frequency = "q",
+  observation_start = as.Date("1954-01-01"),
+  observation_end = as.Date("2018-07-01")
+)
+rc <- rc[,-2]
+names(rc) <- c("date", "rc")
+
+I <- fredr(
+  series_id = "GPDIC1",
+    frequency = "q",
+  observation_start = as.Date("1954-01-01"),
+  observation_end = as.Date("2018-07-01")
+)
+I <- I[,-2]
+names(I) <- c("date", "I")
+
+
+m2 <- fredr(
+  series_id = "M2SL",
+    frequency = "q",
+  observation_start = as.Date("1954-01-01"),
+  observation_end = as.Date("2018-07-01")
+)
+m2 <- m2[,-2]
+names(m2) <- c("date", "m2")
+
+cpix <- fredr(
+  series_id = "CPIAUCSL",
+    frequency = "q",
+  observation_start = as.Date("1954-01-01"),
+  observation_end = as.Date("2018-07-01")
+)
+cpix <- cpix[,-2]
+names(cpix) <- c("date", "cpi")
+
+
+N <- N <- read_excel("us_total_hrs_emp.xlsx", 
+    sheet = "Hours", range = "a6:b400")
+N<- N[-(1:6),]
+N$Sector <- str_replace_all(N$Sector, "Q1", "-01-01" )
+N$Sector <- str_replace_all(N$Sector, "Q2", "-04-01" )
+N$Sector <- str_replace_all(N$Sector, "Q3", "-07-01" )
+N$Sector <- str_replace_all(N$Sector, "Q4", "-10-01" )
+names(N) <- c("date", "N")
+N$date <- as.Date(N$date)
+data <- left_join(rgdp, rc, by = "date")
+data <- left_join(data, I, by = "date")
+data <- left_join(data, m2, by = "date")
+data <- left_join(data, cpix, by = "date")
+data <- left_join(data, N, by = "date")
+data$N <- as.numeric(data$N)
+```
+
+```{r}
+data %>% 
+  mutate(pr = rgdp/N) %>% 
+  mutate(cpim1 = lag(cpi)) %>% 
+  mutate(inf = ((cpi - cpim1)/cpim1 *100 )) -> data
+```
+
+
+```{r}
+data$y_t <- hpfilter(data$rgdp, freq = 1600)$trend
+data$rc_t <- hpfilter(data$rc, freq = 1600)$trend
+data$I_t <- hpfilter(data$I, freq = 1600)$trend
+a <- rep(NA, 20)
+data$m2_t <- c(a, hpfilter(data$m2[21:259], freq = 1600)$trend)
+data$cpi_t <- hpfilter(data$cpi, freq = 1600)$trend
+data$N_t<- hpfilter(data$N, freq = 1600)$trend
+data$pr_t <- hpfilter(data$pr, freq = 1600)$trend
+
+
+ggplot(data) + 
+  geom_line(aes(date, y_t), color = "blue", size = 1) +
+  geom_line(aes(date, rgdp), color = "red2", size = 1) + 
+  theme_hc() + 
+  xlab("Year") +
+  ylab("Real GDP, Billion USD") +
+  ggtitle("Real GDP vs. Trend Real GDP") + 
+  geom_text(x = 15000, y = 14000, label = "GDP", color = "red") +
+  geom_text(x = 10000, y = 9000, label = "Trend",  color = "blue") 
+  
+
+```
+
+
+
+
+
+```{r}
+cycle <- function(x, y){
+  (log(x) -log(y)) * 100
+}
+
+data$y_c <- cycle(data$rgdp, data$y_t)
+data$rc_c <- cycle(data$rc, data$rc_t)
+data$I_c <-cycle(data$I, data$I_t)
+data$m2_c <- cycle(data$m2, data$m2_t)
+data$cpi_c <- cycle(data$cpi, data$cpi_t)
+data$N_c<- cycle(data$N, data$N_t)
+data$pr_c<- cycle(data$pr, data$pr_t)
+
+ggplot(data) +
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  theme_hc() +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Detrended GDP ")
+
+
+
+ggplot(data) + 
+  geom_path(aes(date, rc_c), color = "Red", size = 1) +
+  geom_path(aes(date, y_c), color = "Blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Real Consumption and Real GDP Trend Lines") +
+  geom_text(x = 5000, y = 3.5, label = "GDP", color = "blue") +
+  geom_text(x = 8000, y = -2.5, label = "Consumption",  color = "red") +
+  theme_hc()
+
+ggplot(data) + 
+  geom_line(aes(date, m2_c), color = "red", size = 1) +
+  geom_line(aes(date, y_c), color = "blue", size = 1)+
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Money Supply (M2) and Real GDP Trend Lines") +
+  geom_text(x = 5000, y = 3.5, label = "GDP", color = "blue") +
+  geom_text(x = 8000, y = -2.5, label = "Money Supply", color = "red") +
+  theme_hc()
+
+
+
+ggplot(data) + 
+  geom_line(aes(date, I_c), color = "red", size = 1) +
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Investment and Real GDP Trend Lines") +
+  geom_text(x = -6000, y = -4, label = "GDP", color = "blue", size = 5) +
+  geom_text(x = 7000, y = -20.5, label = "Investment", color = "red", size = 5) +
+  theme_hc()
+  
+ggplot(data) + 
+  geom_line(aes(date, N_c), color = "red", size = 1) +
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Hours Worked and Real GDP Trend Lines") +
+  geom_text(x = 6000, y = -4, label = "GDP", color = "blue", size = 5) +
+  geom_text(x = 11000, y = 3, label = "Hours Worked", color = "red", size = 5) +
+  theme_hc()
+
+ggplot(data) + 
+  geom_line(aes(date, cpi_c), color = "red", size = 1) +
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("CPI and Real GDP Trend Lines") +
+  geom_text(x = 6000, y = -4, label = "GDP", color = "blue") +
+  geom_text(x = 13000, y = 3, label = "CPI", color = "red") +
+  theme_hc()
+
+ggplot(data) + 
+  geom_line(aes(date, pr_c), color = "red", size =1)+
+  geom_line(aes(date, y_c), color = "blue", size = 1)+
+  xlab("Year") +
+  ylab("% Deviation from Trend") +
+  ggtitle("Productivity and Real GDP Trend Lines") +
+  geom_text(x = 6000, y = -4, label = "GDP", color = "blue") +
+  geom_text(x = 8000, y = 2.6, label = "Productivity", color = "red") +
+  theme_hc()
+ 
+data$inf_c <- c(NA, data$inf[-1] - hpfilter(data$inf[-1], freq = 1600)$trend)
+ggplot(data) + 
+  geom_line(aes(date, inf_c), color = "red", size =1 )+
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("Inflation and Real GDP Trend Lines") +
+  geom_text(x = 6000, y = -4, label = "GDP", color = "blue", size = 5) +
+  geom_text(x = 9000, y = 1, label = "Inflation", color = "red", size = 5) +
+  theme_hc()
+
+```
+
+
+```{r, include=FALSE}
+bcstats <- function(x, y){
+  b <- sd(x) 
+  c <- sd(x)/sd(y)
+  d <- cor(lag(x)[2:259], y[2:259])
+  e <-cor(x,y)
+  f <- cor(lead(x)[1:258], y[1:258])
+  table <- data.frame(b,c,d,e,f)
+  colnames(table) <- c("SD", "RSD", "Correlation of (xt-1, GDPt)", "Correlation of (xt, GDPt)", "Correlation of (xt+1, GDPt)")
+  table <- t(table)
+  colnames(table) <- c("Variable")
+  print(table)
+}
+
+bcstatsgdp <- bcstats(data$y_c, data$y_c)
+bcstatsc <- bcstats(data$rc_c, data$y_c)
+bcstatsi<- bcstats(data$I_c, data$y_c)
+bcstatscpi <- bcstats(data$cpi_c, data$y_c)
+bcstatspr <- bcstats(data$pr_c, data$y_c)
+bcstatsN <- bcstats(data$N_c, data$y_c)
+
+bcstatsm2 <- data.frame(sd(data$m2_c[21:259]), sd(data$m2_c[21:259])/sd(data$y_c[21:259]), cor(lag(data$m2_c)[22:259], data$y_c[22:259]), cor(data$m2_c[21:259], data$y_c[21:259]), cor(lead(data$m2_c)[21:258], data$y_c[21:258]))
+colnames(bcstatsm2)<- c("SD", "RSD", "Cor(xt-1, GDPt)", "Cor(xt, GDPt)", "Cor(xt+1, GDPt)")
+bcstatsm2 <- t(bcstatsm2)
+colnames(bcstatsm2) <- c("Variable")
+
+bcstatsinf <- data.frame(sd(data$inf_c[2:259]), sd(data$inf_c[2:259])/sd(data$y_c[2:259]), cor(lag(data$inf_c)[3:259], data$y_c[3:259]), cor(data$inf_c[2:259], data$y_c[2:259]), cor(lead(data$inf_c)[2:258], data$y_c[2:258]))
+colnames(bcstatsinf)<- c("SD", "RSD", "Cor(xt-1, GDPt)", "Cor(xt, GDPt)", "Cor(xt+1, GDPt)")
+bcstatsinf <- t(bcstatsinf)
+colnames(bcstatsinf) <- c("Variable")
+
+table1 <- cbind(bcstatsgdp, bcstatsc, bcstatsi,bcstatsN, bcstatspr, bcstatscpi, bcstatsinf, bcstatsm2)
+colnames(table1) <- c("GDP", "Real Consumption", "Investment", "Hours Worked", "Productivity", "CPI", "Inflation", "Money Supply" )
+
+m <- t(table1)
+m <- m[-7,]
+m <- m[,-2]
+a1 <- c(1.71, 1.25, 8.30, 1.47, 0.88, 1.41, 1.84)
+a2 <- c(0.85, 0.81, 0.79, 0.69, 0.50, -0.68, 0.61)
+a3 <- c(1.00, 0.82, 0.91, 0.86, 0.51, -0.57, 0.46)
+a4 <- c(0.85, 0.66, 0.75, 0.86, 0.21, -0.41, 0.26)
+KPtable <- matrix(c(a1, a2, a3, a4), 7, 4)
+
+
+```
+
+```{r}
+round(t(table1),2)
+round(matrix(m, 7, 4) - KPtable, 2)
+```
+
+
+```{r}
+total <- c(cor(data$y_c, data$cpi_c), cor(data$N_c, data$pr_c))
+initial <- c(cor(data$y_c[1:148], data$cpi_c[1:148]), cor(data$N_c[1:148], data$pr_c[1:148]))
+final <- c(cor(data$y_c[145:259], data$cpi_c[145:259]), cor(data$N_c[145:259], data$pr_c[145:259]))
+
+table2 <- rbind(total, initial, final)
+
+colnames(table2) <- c("Cor(GDP, CPI)", "Cor(Hours, Productivity))")
+rownames(table2) <- c("1954-2018", "1954-1990", "1990-2018")
+round(table2,2)
+
+```
+
+```{r}
+data2 <- data[145:259,]
+
+ggplot(data2) + 
+  geom_line(aes(date, cpi_c), color = "red", size = 1) +
+  geom_line(aes(date, y_c), color = "blue", size = 1) +
+  xlab("Year") +
+  ylab("Percent Deviation from Trend") +
+  ggtitle("CPI and Real GDP Trend Lines") +
+  geom_text(x = 6000, y = -4, label = "GDP", color = "blue") +
+  geom_text(x = 13000, y = 3, label = "CPI", color = "red") +
+  theme_hc()
+
+data3 <- data[145:216,]
+data4 <- data[217:259,]
+
+cor(data3$cpi_c, data3$y_c)
+cor(data4$cpi_c, data4$y_c)
+
+```
